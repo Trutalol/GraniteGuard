@@ -79,6 +79,9 @@ class Copilot:
               ORDER BY SCORE DESC LIMIT 20)
             ORDER BY {"RANK ASC" if by_rank else "SCORE DESC"} LIMIT {k}""")
         ctx = pd.concat([exact, sim]).drop_duplicates("CVE_ID").head(k).reset_index(drop=True)
+        # The REST API returns numbers as long strings (9.8000000000000007); round before Granite sees them.
+        for col, digits in [("CVSS3_SCORE", 1), ("EPSS", 3)]:
+            ctx[col] = pd.to_numeric(ctx[col], errors="coerce").round(digits)
         return ctx, ids
 
     def ask(self, question, k=5):
