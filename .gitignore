@@ -6,6 +6,9 @@ data/raw/*
 data/processed/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
+!data/processed/top500.csv
+!data/processed/epss_history.csv
+!data/processed/threat_cards.csv
 .ipynb_checkpoints/
 .streamlit/secrets.toml
 *.lgb
