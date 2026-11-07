@@ -1,0 +1,17 @@
+pandas>=2.2
+numpy>=1.26
+python-dotenv>=1.0
+# Person 1
+psycopg[binary]>=3.1
+lightgbm>=4.3
+scikit-learn>=1.4
+# Person 2
+sentence-transformers>=3.0
+ibm-watsonx-ai>=1.1
+snowflake-connector-python>=3.10
+requests>=2.32
+# Person 3
+streamlit>=1.38
+plotly>=5.22
+# Everyone
+pytest>=8.0
