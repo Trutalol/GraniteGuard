@@ -116,25 +116,31 @@ selected = top.loc[top.cve_id == cve].iloc[0]
 with left:
     html(f'<div class="gg-section"><h2>Priority queue</h2><span class="gg-count">{len(queue)} findings</span></div>')
     st.caption("Ordered by model rank. Your selected finding is highlighted.")
-    headers = ["Rank", "Vulnerability", "Score", "CVSS", "EPSS", "Change"]
+    # Score is a rank average (0.98-1.00 for every row) and 2026 has no EPSS history, so show
+    # signals an engineer can act on instead: public exploit code and the attack surface tags.
+    surface = cards.set_index("cve_id")["attack_surface"].to_dict() if not cards.empty else {}
+    headers = ["Rank", "Vulnerability", "CVSS", "EPSS", "Exploit code", "Attack surface"]
     rows = []
     for row in queue.itertuples():
-        values = [number(row.rank, ".0f"), row.cve_id, number(row.score, ".3f"),
+        tags = [t.strip() for t in str(surface.get(row.cve_id, "")).split(";") if t.strip()]
+        has_exploit = "public exploit code" in tags
+        tags = [t for t in tags if t != "public exploit code"]
+        values = [number(row.rank, ".0f"), row.cve_id,
                   number(row.cvss, ".1f"), number(row.epss, ".2%"),
-                  "Unavailable" if pd.isna(row.epss_momentum) else f"{row.epss_momentum * 100:+.2f} pp"]
+                  "✓ Public" if has_exploit else "None known",
+                  ", ".join(tags) if tags else "Pending"]
         style = ' class="selected"' if row.cve_id == cve else ""
         cells = [escape(str(value)) for value in values]
         risk_class = "critical" if pd.notna(row.cvss) and row.cvss >= 9 else ""
-        cells[3] = f'<span class="gg-risk {risk_class}">{cells[3]}</span>'
-        direction = "gg-up" if pd.notna(row.epss_momentum) and row.epss_momentum > 0 else "gg-down"
-        cells[5] = f'<span class="{direction}">{cells[5]}</span>'
+        cells[2] = f'<span class="gg-risk {risk_class}">{cells[2]}</span>'
+        cells[4] = f'<span class="{"gg-up" if has_exploit else "gg-down"}">{cells[4]}</span>'
         rows.append(f"<tr{style}>" + "".join(f"<td>{value}</td>" for value in cells) + "</tr>")
     st.markdown('<div class="gg-table-wrap">'
                 '<table class="gg-table"><thead><tr>' + ''.join(f'<th>{h}</th>' for h in headers)
                 + '</tr></thead><tbody>' + ''.join(rows) + '</tbody></table></div>', unsafe_allow_html=True)
     with st.expander("What do these numbers mean?"):
-        st.write("**Model score:** orders the queue; it is not a probability. **Severity (CVSS):** potential impact on a 0–10 scale. **EPSS:** estimated probability of exploitation in the next 30 days.")
-        st.write("**EPSS change:** difference between monthly snapshots in percentage points (pp). Moving from 10% to 12% is +2 pp. Missing values mean unavailable, not zero risk.")
+        st.write("**Rank:** our model's order out of 72,670 vulnerabilities published in 2026; 1 = fix first. **Severity (CVSS):** potential impact on a 0–10 scale. **EPSS:** estimated probability of exploitation in the next 30 days.")
+        st.write("**Exploit code:** public attack or detection code existed at the snapshot month (Exploit-DB, Metasploit, Nuclei or a GitHub proof of concept). **Attack surface:** how it is reached, from CVSS fields and the description: remote, pre-auth, no user click, RCE.")
     st.caption("Select a CVE in Investigate to explore its details. Scores remain fixed until the dataset changes.")
 
 with right:
@@ -177,7 +183,7 @@ with right:
 
     with copilot:
         st.markdown("**Ask about this vulnerability**")
-        st.caption("Snowflake Copilot · answers require source verification")
+        st.caption("IBM Granite + Snowflake Copilot · answers cite their source CVEs")
         st.caption("Validate mitigation advice against vendor guidance before acting.")
         messages = st.session_state.setdefault("chats", {}).setdefault(cve, [])
         for message in messages:
@@ -187,11 +193,11 @@ with right:
             q = st.text_input("Question", placeholder="What evidence supports prioritizing this CVE?")
             submitted = st.form_submit_button("Ask Copilot")
         if submitted and q.strip():
-            if not (config.env("COPILOT_URL") or config.env("SNOWFLAKE_ACCOUNT")):
-                st.info("Copilot is offline until real data and Snowflake are configured. No generated answer has been substituted.")
+            if not (config.env("COPILOT_URL") and config.env("COPILOT_KEY")):
+                st.info("Copilot is offline: set COPILOT_URL and COPILOT_KEY in .env (from Person 2). No generated answer has been substituted.")
             else:
                 try:
-                    with st.spinner("Querying Snowflake…"):
+                    with st.spinner("IBM Granite is searching Snowflake…"):
                         answer = ask(cve, q.strip())
                     messages.extend([{"role": "user", "content": q.strip()}, {"role": "assistant", "content": answer}])
                     st.rerun()
