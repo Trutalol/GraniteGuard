@@ -1,0 +1,70 @@
+{
+  "backtest": "train on 2024 snapshots with KEV known to 2024-12-31; test on CVEs published Jan-Sep 2025, snapshot rules as 2026, label = added to KEV by 2025-11-04",
+  "test_rows": 35277,
+  "test_positives": 45,
+  "k_scaled_equivalent_of_top500": 243,
+  "hits_at_500": {
+    "cvss3_first": 7,
+    "epss_first": 8,
+    "public_exploit_then_epss": 16,
+    "lightgbm": 17,
+    "xgboost": 18,
+    "logistic": 18,
+    "prior_only": 11,
+    "ensemble": 20
+  },
+  "hits_at_243": {
+    "cvss3_first": 7,
+    "epss_first": 8,
+    "public_exploit_then_epss": 14,
+    "lightgbm": 15,
+    "xgboost": 15,
+    "logistic": 14,
+    "prior_only": 8,
+    "ensemble": 17
+  },
+  "hits_at_1000": {
+    "cvss3_first": 10,
+    "epss_first": 11,
+    "public_exploit_then_epss": 20,
+    "lightgbm": 21,
+    "xgboost": 22,
+    "logistic": 21,
+    "prior_only": 18,
+    "ensemble": 23
+  },
+  "logistic_coefficients": {
+    "epss": -0.283,
+    "epss_pct": 0.212,
+    "n_exploit_flags": 0.219,
+    "poc_github": 0.214,
+    "nuclei": 0.179,
+    "metasploit": -0.147,
+    "exploitdb": 0.035,
+    "prior_score": 1.56,
+    "vendor_kev_cum": 0.063,
+    "product_kev_12m": -0.063,
+    "assigner_kev_rate": 0.422,
+    "kw_exploited": 0.035,
+    "days_observed": 0.021,
+    "horizon_days": 0.515
+  },
+  "final_train_rows": 82424,
+  "final_train_positives": 112,
+  "lightgbm_split_importance": {
+    "prior_score": 319.4,
+    "assigner_kev_rate": 166.4,
+    "days_observed": 148.4,
+    "n_exploit_flags": 131.0,
+    "horizon_days": 130.4,
+    "epss": 84.8,
+    "nuclei": 66.4,
+    "epss_pct": 53.4,
+    "poc_github": 44.0,
+    "vendor_kev_cum": 42.6,
+    "product_kev_12m": 12.8,
+    "exploitdb": 0.2,
+    "metasploit": 0.0,
+    "kw_exploited": 0.0
+  }
+}
