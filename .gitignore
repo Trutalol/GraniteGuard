@@ -10,3 +10,8 @@ data/processed/*
 .streamlit/secrets.toml
 *.lgb
 models/
+# Snowflake private keys: never commit
+keys/
+*.p8
+*.pem
+cloudflared

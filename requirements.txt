@@ -10,8 +10,14 @@ scipy>=1.11
 scikit-learn>=1.4
 # Person 2
 sentence-transformers>=3.0
-ibm-watsonx-ai>=1.1
-snowflake-connector-python>=3.10
+transformers>=4.45
+accelerate>=0.34
+torch>=2.2
+snowflake-connector-python[pandas]>=3.10
+cryptography>=42
+pyjwt>=2.8
+fastapi>=0.110
+uvicorn>=0.29
 requests>=2.32
 # Person 3
 streamlit>=1.38
