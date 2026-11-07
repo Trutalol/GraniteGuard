@@ -28,19 +28,13 @@ app/       ◄──  reads all three files + calls ai/copilot.py
 The exact columns of every handoff file are defined in `shared/contracts.py`.
 **If you change a column, update the contract and tell the team.**
 
-## Don't wait on each other
-
-Run `python -m shared.sample_data` to write fake versions of every handoff file.
-Person 2 and Person 3 can build against those on day one while Person 1 builds the real pipeline.
-
 ## Setup
 
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env        # fill in your own keys, never commit .env
-python -m shared.sample_data
-streamlit run app/streamlit_app.py
+streamlit run app/streamlit_app.py   # uses the real files in data/processed/
 ```
 
 ## Run the real thing end to end

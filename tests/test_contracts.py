@@ -1,15 +1,9 @@
-"""Check every handoff file matches shared/contracts.py. Runs on sample data if needed."""
+"""Check every handoff file matches shared/contracts.py. Skips files not produced yet."""
 import pandas as pd
 import pytest
 
-from shared import config, sample_data
+from shared import config
 from shared.contracts import EPSS_HISTORY_COLUMNS, THREAT_CARDS_COLUMNS, TOP500_COLUMNS
-
-
-@pytest.fixture(scope="session", autouse=True)
-def ensure_files():
-    if not config.TOP500_CSV.exists():
-        sample_data.main()
 
 
 @pytest.mark.parametrize("path,cols", [
@@ -24,6 +18,8 @@ def test_columns_match_contract(path, cols):
 
 
 def test_top500_is_ranked():
+    if not config.TOP500_CSV.exists():
+        pytest.skip("top500.csv not produced yet")
     top = pd.read_csv(config.TOP500_CSV)
     assert len(top) <= 500
     assert top["rank"].tolist() == list(range(1, len(top) + 1))

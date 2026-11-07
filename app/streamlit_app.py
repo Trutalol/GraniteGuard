@@ -36,7 +36,7 @@ def load():
 try:
     top, hist, cards = load()
 except FileNotFoundError:
-    st.error("No data yet. Run `python -m shared.sample_data` for fake data.")
+    st.error("No data yet. Run `python train_and_predict.py` (Person 1) and `python -m ai.granite_briefs` (Person 2) to create data/processed.")
     st.stop()
 except (pd.errors.ParserError, pd.errors.EmptyDataError, UnicodeDecodeError):
     st.error("A handoff CSV is empty or unreadable. Ask its owner to regenerate it.")
@@ -57,15 +57,6 @@ if top[["rank", "score"]].isna().any().any():
     st.error("Rank and model score must be numeric.")
     st.stop()
 top = top.sort_values("rank")
-sample = top.description.fillna("").str.startswith("Sample description:").any()
-if sample:
-    scenarios = [
-        "Fictional demo: a web gateway accepts a crafted request that could execute code without signing in.",
-        "Fictional demo: a document preview service processes an unsafe file that could expose application data.",
-        "Fictional demo: an administration portal fails to check permissions on a configuration endpoint.",
-        "Fictional demo: a network service can be interrupted by a specially formed request.",
-    ]
-    top["description"] = [scenarios[int(rank - 1) % len(scenarios)] for rank in top["rank"]]
 with st.sidebar:
     html('<div class="gg-brand"><span class="gg-mark">G</span>GraniteGuard</div><div class="gg-brand-sub">VULNERABILITY INTELLIGENCE</div><div class="gg-nav">◎ &nbsp; Priority workspace</div>')
     html('<div class="gg-kicker">Shape your queue</div>')
@@ -79,17 +70,14 @@ with st.sidebar:
     html('<div class="gg-sidebar-foot">YOUR WORKFLOW<br>01 &nbsp; Focus the queue<br>02 &nbsp; Inspect the evidence<br>03 &nbsp; Plan the next action</div>')
 
 first = top.iloc[0]
-html('<div class="gg-topbar"><span>WORKSPACE &nbsp; / &nbsp; OVERVIEW</span><span class="gg-status">' + ('Demo workspace' if sample else 'Imported dataset') + '</span></div>')
+html('<div class="gg-topbar"><span>WORKSPACE &nbsp; / &nbsp; OVERVIEW</span><span class="gg-status">' + 'Imported dataset' + '</span></div>')
 html(f'''<section class="gg-hero"><div><div class="gg-kicker">A clearer signal. A smarter next step.</div>
 <h1>Less noise.<br><span>Know what to fix first.</span></h1>
 <p>Turn a long list of vulnerabilities into a focused investigation. See the signals, understand the priority, and make your next decision.</p></div>
 <div class="gg-hero-right"><div class="gg-kicker">First in your ranking</div><div class="gg-focus">{escape(str(first['cve_id']))}</div>
 <div class="gg-focus-meta"><span class="gg-pill">PRIORITY #1</span><span class="gg-pill">EPSS {number(first['epss'], '.2%')}</span></div>
 <p>Start with the leading finding, then inspect the evidence behind its position.</p></div></section>''')
-if sample:
-    html('<div class="gg-demo"><strong>◈ Synthetic demo</strong><span>Explore the experience with fictional data. Rankings and explanations are illustrative, not verified AI output.</span></div>')
-else:
-    html('<div class="gg-demo"><strong>Imported data</strong><span>Team-supplied rankings and explanations. Provenance and evaluation are available in Method & submission.</span></div>')
+html('<div class="gg-demo"><strong>Imported data</strong><span>Team-supplied rankings and explanations. Provenance and evaluation are available in Method & submission.</span></div>')
 metrics = [
     ("Vulnerabilities", f"{len(top):,}", "In the supplied ranking"),
     ("Your review queue", str(budget), "Highest-ranked findings"),
@@ -113,7 +101,7 @@ with st.sidebar.expander("Method & submission"):
             eligible = len(top) == 500 and top.cve_id.isin(scoreboard.cve_id).all()
         except (ValueError, pd.errors.ParserError):
             st.error("Cannot read scoreboard eligibility list.")
-    st.download_button("Download judge top500.csv", top[["cve_id"]].to_csv(index=False), file_name="top500.csv", mime="text/csv", disabled=sample or not eligible)
+    st.download_button("Download judge top500.csv", top[["cve_id"]].to_csv(index=False), file_name="top500.csv", mime="text/csv", disabled=not eligible)
     st.caption("Export requires 500 unique, non-demo IDs in data/raw/scoreboard_2026.csv. It contains only cve_id. Eligibility does not verify temporal leakage or model quality.")
 
 if queue.empty:
@@ -150,7 +138,7 @@ with left:
     st.caption("Select a CVE in Investigate to explore its details. Scores remain fixed until the dataset changes.")
 
 with right:
-    html(f'''<div class="gg-detail"><div class="gg-kicker">Investigation / {"fictional example" if sample else "selected finding"}</div>
+    html(f'''<div class="gg-detail"><div class="gg-kicker">Investigation / selected finding</div>
 <h3>{escape(cve)}</h3><div class="gg-detail-metrics">
 <div><span>PRIORITY RANK</span><b>#{int(selected['rank'])}</b></div>
 <div><span>SEVERITY / 10</span><b>{number(selected['cvss'], '.1f')}</b></div>
@@ -159,13 +147,7 @@ with right:
     with overview:
         st.write(selected["description"])
         card = cards[cards["cve_id"] == cve]
-        if sample:
-            st.markdown("**Why it is in your queue**")
-            st.caption("Illustrative explanation · not generated by IBM Granite")
-            change = selected["epss_momentum"]
-            trend = "unavailable" if pd.isna(change) else f"{change * 100:+.2f} percentage points"
-            st.write(f"This fictional entry is ranked #{int(selected['rank'])} in the demo queue. Its sample EPSS is {number(selected['epss'], '.2%')}, with a monthly change of {trend}. Compare these signals with severity and your own asset exposure before deciding on action.")
-        elif not card.empty:
+        if not card.empty:
             st.markdown("**Why fix this first**")
             st.caption(card.iloc[0]["attack_surface"])
             st.write(card.iloc[0]["why_fix_first"])
@@ -189,13 +171,13 @@ with right:
             chart.update_xaxes(gridcolor="#eeeeee")
             chart.update_yaxes(gridcolor="#eeeeee")
             st.plotly_chart(chart, use_container_width=True)
-            st.caption("Synthetic history is generated separately from the demo table and may not match its latest EPSS." if sample else "Monthly history supplied by the team. EPSS changed models in March 2025; this chart does not prove exploitation.")
+            st.caption("Monthly history supplied by the team. EPSS changed models in March 2025; this chart does not prove exploitation.")
         else:
             st.info("EPSS history pending from Person 1.")
 
     with copilot:
         st.markdown("**Ask about this vulnerability**")
-        st.caption("Demo mode · connection pending" if sample else "Snowflake Copilot · answers require source verification")
+        st.caption("Snowflake Copilot · answers require source verification")
         st.caption("Validate mitigation advice against vendor guidance before acting.")
         messages = st.session_state.setdefault("chats", {}).setdefault(cve, [])
         for message in messages:
@@ -205,7 +187,7 @@ with right:
             q = st.text_input("Question", placeholder="What evidence supports prioritizing this CVE?")
             submitted = st.form_submit_button("Ask Copilot")
         if submitted and q.strip():
-            if sample or not config.env("SNOWFLAKE_ACCOUNT"):
+            if not (config.env("COPILOT_URL") or config.env("SNOWFLAKE_ACCOUNT")):
                 st.info("Copilot is offline until real data and Snowflake are configured. No generated answer has been substituted.")
             else:
                 try:
@@ -216,4 +198,4 @@ with right:
                 except Exception:
                     st.error("Copilot request failed. Check backend configuration and retry.")
 
-html('<div class="gg-footer"><span>GRANITEGUARD &nbsp; / &nbsp; Evidence before action.</span><span>IBM Granite · Tiger Data · Snowflake &nbsp; | &nbsp; ' + ('Integrations pending verification' if sample else 'Team integration stack') + '</span></div>')
+html('<div class="gg-footer"><span>GRANITEGUARD &nbsp; / &nbsp; Evidence before action.</span><span>IBM Granite · Tiger Data · Snowflake &nbsp; | &nbsp; ' + 'Team integration stack' + '</span></div>')
