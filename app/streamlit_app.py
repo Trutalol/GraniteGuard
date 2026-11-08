@@ -13,6 +13,7 @@ import streamlit as st
 from ai.copilot import ask
 from chain import solana_attest as chain
 from chain.wallet_ui import wallet_sign
+from app import tiger
 from shared import config
 
 st.set_page_config(page_title="GraniteGuard | Fix this first", page_icon="🛡️", layout="wide")
@@ -175,6 +176,68 @@ def render_history(cve):
         st.caption("Only one snapshot is available for this CVE; a trend cannot be inferred." if len(series) == 1 else "Monthly history supplied by the team. EPSS changed models in March 2025; this chart does not prove exploitation.")
     else:
         st.info("EPSS history pending from Person 1.")
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def tiger_climate():
+    return tiger.threat_climate()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def tiger_vendor(cve_id):
+    assigner = tiger.assigner_of(cve_id)
+    return assigner, (tiger.vendor_heat(assigner) if assigner else pd.DataFrame())
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def tiger_facts():
+    return tiger.timescale_facts()
+
+
+def tiger_line(df, y, title, fmt, color="#0f62fe"):
+    chart = go.Figure(go.Scatter(x=pd.to_datetime(df["bucket"]).dt.strftime("%Y-%m-%d").tolist(), y=df[y].astype(float).tolist(),
+                                 mode="lines+markers", line_color=color, fill="tozeroy", fillcolor="rgba(15,98,254,0.07)",
+                                 hovertemplate="%{x|%b %Y}<br>%{y:" + fmt + "}<extra></extra>"))
+    chart.update_layout(title=title, height=260, yaxis_tickformat=fmt, paper_bgcolor="#fff", plot_bgcolor="#fff",
+                        font_color="#444", margin=dict(l=10, r=10, t=45, b=10))
+    chart.update_xaxes(gridcolor="#eee")
+    chart.update_yaxes(gridcolor="#eee", rangemode="tozero")
+    st.plotly_chart(chart, use_container_width=True)
+
+
+def render_tiger(cve):
+    st.divider()
+    st.markdown("**Live from Tiger Data**")
+    st.caption("Queried now from TimescaleDB continuous aggregates over the 6.4M-row exploit_signals hypertable "
+               "(monthly EPSS and public-exploit flags, 2024-2025).")
+    if not tiger.available():
+        st.info("Set TIGER_DATABASE_URL in .env to show live Tiger Data signals.")
+        return
+    try:
+        with st.spinner("Querying Tiger Data…"):
+            assigner, heat = tiger_vendor(cve)
+            climate = tiger_climate()
+    except Exception as exc:
+        st.warning(f"Tiger Data is unreachable right now ({type(exc).__name__}). The ranking above does not depend on it.")
+        return
+    if assigner and not heat.empty:
+        st.markdown(f"**Vendor heat** · CVEs published by `{escape(str(assigner))}`")
+        tiger_line(heat, "public_code_rate", "Share of this assigner's earlier CVEs with public exploit code", ".1%")
+        st.caption(f"Across {int(heat.cves_tracked.max()):,} of its CVEs tracked in a month; "
+                   f"{int(heat.cves_in_kev.max()):,} on CISA's exploited list at the peak. "
+                   "A team whose past bugs drew exploit code is a warning sign for its new ones.")
+    else:
+        st.caption("No 2024-2025 history for this CVE's assigner.")
+    if not climate.empty:
+        st.markdown("**Threat climate** · all tracked CVEs")
+        tiger_line(climate, "public_code_share", "Share of tracked CVEs with public exploit code, by month", ".1%", "#8a3ffc")
+    with st.expander("Tiger Data details"):
+        try:
+            facts = tiger_facts()
+            st.write(f"TimescaleDB {facts['version']} · hypertable `exploit_signals`: {facts['rows']:,} rows in "
+                     f"{facts['chunks']} chunks · {'compressed' if facts['compressed'] else 'uncompressed'} size {facts['size']}")
+        except Exception as exc:
+            st.write(f"Could not read Tiger details: {exc}")
 
 
 def render_exploration(cve, candidates):
@@ -417,6 +480,7 @@ Confirm the installed version and relevant configuration after the change, run y
         st.info("Need more context? Use Ask Copilot for a CVE-specific question. Verify any proposed fix against the original vendor source.")
     with evidence:
         render_history(cve)
+        render_tiger(cve)
 
     with copilot:
         st.markdown("**Ask about this vulnerability**")
@@ -484,4 +548,4 @@ Confirm the installed version and relevant configuration after the change, run y
                 except Exception as exc:
                     st.error(f"Sign-off failed: {exc}. Check the GraniteGuard fee wallet has devnet SOL (py -m chain.solana_attest).")
 
-html('<div class="gg-footer"><span>GRANITEGUARD &nbsp; / &nbsp; Evidence before action.</span><span>IBM Granite · Tiger Data · Snowflake · Solana &nbsp; | &nbsp; ' + 'Team integration stack' + '</span></div>')
+html('<div class="gg-footer"><span>GRANITEGUARD &nbsp; / &nbsp; Evidence before action.</span><span>IBM Granite · Tiger Data (live) · Snowflake · Solana &nbsp; | &nbsp; ' + 'Team integration stack' + '</span></div>')
