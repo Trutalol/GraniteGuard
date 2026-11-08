@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GraniteGuard: sign with your wallet</title>
+<style>
+  :root { --ink:#161616; --muted:#6f6f6f; --line:#e0e0e0; --blue:#0f62fe; --bg:#f4f4f4; --ok:#0e6027; --bad:#a2191f; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 "IBM Plex Sans", system-ui, sans-serif; }
+  main { max-width:620px; margin:48px auto; padding:0 16px; }
+  .card { background:#fff; border:1px solid var(--line); border-radius:8px; padding:28px; }
+  .brand { font-weight:700; letter-spacing:.02em; } .brand span { background:var(--ink); color:#fff; padding:2px 8px; margin-right:8px; border-radius:3px; }
+  h1 { font-size:22px; margin:20px 0 6px; } p { color:var(--muted); margin:0 0 16px; }
+  dl { display:grid; grid-template-columns:130px 1fr; gap:6px 12px; margin:20px 0; font-size:13px; }
+  dt { color:var(--muted); } dd { margin:0; font-family:ui-monospace, Menlo, Consolas, monospace; word-break:break-all; }
+  button { width:100%; padding:12px; border:0; border-radius:6px; background:var(--blue); color:#fff; font-size:15px; font-weight:600; cursor:pointer; }
+  button:disabled { background:#a8a8a8; cursor:default; }
+  #status { margin-top:16px; font-size:14px; min-height:22px; } .ok { color:var(--ok); } .bad { color:var(--bad); }
+  a { color:var(--blue); }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <div class="brand"><span>G</span>GraniteGuard &middot; Proof of Patch</div>
+    <h1>Sign this fix with your wallet</h1>
+    <p>Your wallet (Solflare or Phantom) will ask you to approve one Solana devnet transaction. Only the fingerprint below goes on-chain;
+       the CVE and fix details stay in GraniteGuard. The GraniteGuard service wallet pays the fee, so you need no SOL.</p>
+    <dl>
+      <dt>CVE</dt><dd id="cve"></dd>
+      <dt>Attestation</dt><dd id="memo"></dd>
+      <dt>Network</dt><dd>Solana devnet</dd>
+      <dt>Your wallet</dt><dd id="wallet">not connected</dd>
+    </dl>
+    <button id="go">Connect wallet &amp; sign</button>
+    <div id="status"></div>
+  </div>
+</main>
+<script src="solana-web3-1.98.0.min.js"></script>
+<script>
+const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+const q = new URLSearchParams(location.search);
+const memo = q.get("memo") || "", cve = q.get("cve") || "", feePayer = q.get("payer") || "";
+const rpc = q.get("rpc") || "https://api.devnet.solana.com", ret = q.get("ret") || "";
+const $ = (id) => document.getElementById(id);
+window.ggNavigate = window.ggNavigate || ((url) => { location.href = url; });
+const status = (msg, cls = "") => { $("status").className = cls; $("status").textContent = msg; };
+$("cve").textContent = cve; $("memo").textContent = memo;
+
+function b64url(bytes) {
+  let s = ""; bytes.forEach((b) => (s += String.fromCharCode(b)));
+  return btoa(s).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+// Solflare and Phantom both inject a provider with connect() and signTransaction().
+function provider() {
+  if (window.solflare && window.solflare.isSolflare) return { name: "Solflare", w: window.solflare };
+  if (window.phantom && window.phantom.solana && window.phantom.solana.isPhantom) return { name: "Phantom", w: window.phantom.solana };
+  if (window.solana && window.solana.isPhantom) return { name: "Phantom", w: window.solana };
+  return null;
+}
+
+// Build the transaction: the app wallet pays the fee, the engineer's wallet is the Memo signer.
+async function buildTx(signer, blockhash) {
+  const { Transaction, TransactionInstruction, PublicKey } = solanaWeb3;
+  // web3.js wants its bundled Buffer type for instruction data; borrow the class from a PublicKey.
+  const BufferCls = signer.toBuffer().constructor;
+  const tx = new Transaction({ feePayer: new PublicKey(feePayer), recentBlockhash: blockhash });
+  tx.add(new TransactionInstruction({
+    programId: new PublicKey(MEMO_PROGRAM),
+    keys: [{ pubkey: signer, isSigner: true, isWritable: false }],
+    data: BufferCls.from(memo, "utf8"),
+  }));
+  return tx;
+}
+
+$("go").onclick = async () => {
+  if (!memo.startsWith("GG1|attest|") || !feePayer || !ret) { status("This signing link is incomplete. Start again from the dashboard.", "bad"); return; }
+  const found = provider();
+  if (!found) { status("No Solana wallet found. Install the Solflare or Phantom browser extension, then reload this page.", "bad"); return; }
+  const wallet = found.w;
+  $("go").disabled = true;
+  try {
+    status("Connecting to " + found.name + "…");
+    const res = await wallet.connect();  // Phantom returns { publicKey }; Solflare returns true
+    const publicKey = (res && res.publicKey) || wallet.publicKey;
+    if (!publicKey) throw new Error(found.name + " did not share a wallet address.");
+    $("wallet").textContent = publicKey.toBase58();
+    status("Fetching a recent devnet blockhash…");
+    const conn = new solanaWeb3.Connection(rpc, "confirmed");
+    const { blockhash } = await conn.getLatestBlockhash("confirmed");
+    const tx = await buildTx(publicKey, blockhash);
+    status("Approve the request in " + found.name + "…");
+    const signed = await wallet.signTransaction(tx);
+    const raw = signed.serialize({ requireAllSignatures: false, verifySignatures: false });
+    status("Signed. Returning to GraniteGuard to submit…", "ok");
+    const sep = ret.includes("?") ? "&" : "?";
+    window.ggNavigate(ret + sep + "wtx=" + b64url(raw));
+  } catch (err) {
+    $("go").disabled = false;
+    status("Not signed: " + (err && err.message ? err.message : err), "bad");
+  }
+};
+</script>
+</body>
+</html>

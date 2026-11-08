@@ -11,6 +11,8 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from ai.copilot import ask
+from chain import solana_attest as chain
+from chain.wallet_ui import wallet_sign
 from shared import config
 
 st.set_page_config(page_title="GraniteGuard | Fix this first", page_icon="🛡️", layout="wide")
@@ -58,6 +60,58 @@ if top[["rank", "score"]].isna().any().any():
     st.error("Rank and model score must be numeric.")
     st.stop()
 top = top.sort_values("rank")
+
+
+@st.cache_resource
+def fresh_signoff_session():
+    # Runs once per Streamlit start: archive the previous sign-off list so each run starts clean.
+    return chain.reset_session_log()
+
+
+fresh_signoff_session()
+signoffs = chain.latest_signoffs()  # cve_id -> latest Solana sign-off (off-chain log)
+
+
+@st.dialog("Sign off on Solana")
+def sign_dialog():
+    request = st.session_state["gg_sign_request"]
+    entry = st.session_state.get("gg_sign_entry")
+    if not (entry and entry["sha256"] == request["request_id"]):
+        st.write(f"Approve the sign-off for **{request['cve']}** in your Solflare or Phantom popup.")
+        st.caption("Only the fingerprint goes on-chain. GraniteGuard pays the network fee, so your wallet needs no SOL.")
+        result = wallet_sign(request, key=f"wallet_{request['request_id']}")
+        if not (result and result.get("request_id") == request["request_id"] and result.get("wtx")):
+            return  # waiting for the wallet
+        try:
+            with st.spinner("Submitting to Solana…"):
+                entry = chain.complete_wallet_signoff(result["wtx"])
+            st.session_state["gg_sign_entry"] = entry
+        except Exception as exc:
+            st.error(f"Not submitted: {exc}")
+            return
+    st.success("Signed with your wallet and anchored on Solana.")
+    st.code(f"SHA-256  {entry['sha256']}\nSigner   {entry['signer']}", language=None)
+    st.link_button("View transaction on Solana Explorer", entry["explorer"])
+    if st.button("Done", type="primary"):
+        st.rerun()
+
+
+@st.dialog("Verify on Solana")
+def verify_dialog(entry, action):
+    try:
+        with st.spinner("Fetching the transaction from Solana…"):
+            result = chain.verify(entry, dict(entry["record"], action=action))
+    except Exception as exc:
+        st.error(f"Could not reach Solana: {exc}")
+        return
+    if result["match"] and result["signer_ok"]:
+        st.success("Match. This record is exactly what was signed.")
+        st.write(f"**Signed by** `{result['signer']}`")
+        st.write(f"**When** {result['block_time']} (slot {result['slot']})")
+    else:
+        st.error("Tampered. This record no longer matches the fingerprint stored on Solana.")
+    st.code(f"on Solana  {result['onchain_hash']}\nthis copy  {result['local_hash']}", language=None)
+    st.link_button("View transaction on Solana Explorer", entry["explorer"])
 requested_cve = st.query_params.get("cve", "")
 try:
     initial_budget = max(1, min(len(top), int(st.query_params.get("budget", 500))))
@@ -256,6 +310,8 @@ if not requested_cve:
             description = str(row.description) if pd.notna(row.description) else "Description pending"
             summary = description[:185] + ("..." if len(description) > 185 else "")
             badges = ''.join(f'<span class="gg-issue-tag">{escape(tag)}</span>' for tag in tags[:4])
+            if row.cve_id in signoffs:
+                badges = f'<span class="gg-issue-tag" style="background:#defbe6;color:#0e6027;border-color:#a7f0ba">&#10003; Fix signed on Solana</span>' + badges
             issue_rows.append(f'''<a class="gg-issue-row" href="{escape(page_url(row.cve_id), quote=True)}" target="_self">
     <span class="gg-issue-icon" aria-hidden="true">&#9678;</span><div class="gg-issue-body">
     <div class="gg-issue-title">{escape(row.cve_id)} <span class="gg-issue-rank">#{int(row.rank)}</span></div>
@@ -304,6 +360,12 @@ with metadata:
     st.metric("EPSS likelihood", number(selected["epss"], ".2%"))
     st.caption("EPSS estimates exploitation likelihood over 30 days; it is not severity.")
     st.divider()
+    st.markdown("**Fix status**")
+    if cve in signoffs:
+        st.write("✅ " + chain.STATUSES[signoffs[cve]["record"]["status"]])
+        st.link_button("Solana proof", signoffs[cve]["explorer"])
+    else:
+        st.write("Open: not signed off")
     st.markdown("**Attack surface**")
     st.write(surface.get(cve) or "Not supplied")
     st.markdown("**Published**")
@@ -314,7 +376,7 @@ with metadata:
     st.caption("External record lookups, not verified patch instructions. Follow the vendor advisories linked in the records.")
 
 with main:
-    overview, remediation, evidence, copilot = st.tabs(["Why this first", "How to fix", "Signals", "Ask Copilot"])
+    overview, remediation, evidence, copilot, signoff = st.tabs(["Why this first", "How to fix", "Signals", "Ask Copilot", "Sign off"])
     with overview:
         st.subheader("What is affected?")
         st.write(selected["description"])
@@ -350,7 +412,7 @@ Check the vendor's fixed release or patch and its prerequisites. This dataset do
 Follow your team's backup, testing, and rollback process. If patching must wait, use only temporary controls supported by the vendor advisory and record the remaining exposure.
 
 **4. Verify and document**
-Confirm the installed version and relevant configuration after the change, run your approved checks, and record the evidence before considering the issue resolved.
+Confirm the installed version and relevant configuration after the change, run your approved checks, and record the evidence before considering the issue resolved. The **Sign off** tab anchors that record on Solana.
 """)
         st.info("Need more context? Use Ask Copilot for a CVE-specific question. Verify any proposed fix against the original vendor source.")
     with evidence:
@@ -379,4 +441,47 @@ Confirm the installed version and relevant configuration after the change, run y
                 except Exception:
                     st.error("Copilot request failed. Check backend configuration and retry.")
 
-html('<div class="gg-footer"><span>GRANITEGUARD &nbsp; / &nbsp; Evidence before action.</span><span>IBM Granite · Tiger Data · Snowflake &nbsp; | &nbsp; ' + 'Team integration stack' + '</span></div>')
+    with signoff:
+        st.subheader("Sign off the fix")
+        st.caption("Proof of Patch: the full record stays here; only its SHA-256 fingerprint is written to Solana "
+                   f"{chain.CLUSTER}, so no CVE, product or company name is ever public.")
+        existing = signoffs.get(cve)
+        if existing:
+            rec = existing["record"]
+            with st.container(border=True):
+                st.markdown(f"**✅ {chain.STATUSES[rec['status']]}** by {escape(rec['engineer'])} · {rec['signed_at']}")
+                st.caption(f"Signed with the engineer's own wallet {existing['signer'][:6]}…{existing['signer'][-4:]}; fee paid by GraniteGuard.")
+                st.write(f"**Action:** {rec['action']}")
+                st.write(f"**Reference:** {rec['reference'] or 'none'}")
+                st.code(f"SHA-256  {existing['sha256']}\nTx       {existing['signature']}\nSigner   {existing['signer']}", language=None)
+                st.link_button("View transaction on Solana Explorer", existing["explorer"])
+
+            st.markdown("**Verify against the chain**")
+            st.caption("Recomputes the fingerprint from this record and compares it with what Solana stored. "
+                       "Edit the action below to see tampering caught.")
+            tampered_action = st.text_input("Action as recorded", value=rec["action"], key=f"verify_action_{cve}")
+            if st.button("Verify on Solana", key=f"verify_{cve}"):
+                verify_dialog(existing, tampered_action)
+            st.divider()
+            st.markdown("**Record a new sign-off** (for example, a later permanent fix)")
+
+        with st.form(f"signoff_{cve}"):
+            status = st.selectbox("Resolution", list(chain.STATUSES), format_func=chain.STATUSES.get)
+            action = st.text_input("What was done", placeholder="Upgraded LoadMaster to the vendor's fixed release")
+            reference = st.text_input("Change ticket or fixed version", placeholder="CHG-1042 / 7.2.61")
+            engineer = st.text_input("Signed off by", placeholder="Your name")
+            confirm = st.checkbox("I verified the fix in our environment (checklist step 4)")
+            st.caption("You sign with your own Solflare or Phantom wallet; GraniteGuard pays the network fee, so you need no SOL.")
+            submitted_signoff = st.form_submit_button("Sign off on Solana")
+        if submitted_signoff:
+            if not (action.strip() and engineer.strip() and confirm):
+                st.warning("Fill in what was done and who signed off, and tick the verification box.")
+            else:
+                try:
+                    record = chain.make_record(cve, status, action, reference, engineer, rank=selected["rank"])
+                    st.session_state["gg_sign_request"] = chain.start_wallet_signoff(record)
+                    sign_dialog()
+                except Exception as exc:
+                    st.error(f"Sign-off failed: {exc}. Check the GraniteGuard fee wallet has devnet SOL (py -m chain.solana_attest).")
+
+html('<div class="gg-footer"><span>GRANITEGUARD &nbsp; / &nbsp; Evidence before action.</span><span>IBM Granite · Tiger Data · Snowflake · Solana &nbsp; | &nbsp; ' + 'Team integration stack' + '</span></div>')

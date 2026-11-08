@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<style>
+  body { margin:0; font:14px/1.45 "IBM Plex Sans", system-ui, sans-serif; color:#161616; background:transparent; }
+  .box { border:1px solid #e0e0e0; border-radius:8px; padding:14px 16px; background:#fff; }
+  .row { display:flex; gap:10px; align-items:center; }
+  button { padding:9px 14px; border:0; border-radius:6px; background:#0f62fe; color:#fff; font-weight:600; cursor:pointer; }
+  button:disabled { background:#a8a8a8; cursor:default; }
+  #status { color:#525252; } .ok { color:#0e6027 !important; } .bad { color:#a2191f !important; }
+  code { font-size:12px; color:#6f6f6f; word-break:break-all; }
+</style>
+</head>
+<body>
+<div class="box">
+  <div class="row"><button id="go" disabled>Approve in wallet</button><span id="status">Starting…</span></div>
+  <div><code id="wallet"></code></div>
+</div>
+<script src="solana-web3-1.98.0.min.js"></script>
+<script>
+// Streamlit custom component (raw protocol, no build step). Streamlit sends "streamlit:render" with args;
+// we answer with "streamlit:setComponentValue". The iframe is same-origin with the dashboard, so it can
+// use the Solflare/Phantom provider the extension injected into the main page (window.parent).
+const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+const send = (type, extra) => window.parent.postMessage(Object.assign({ isStreamlitMessage: true, type }, extra), "*");
+const $ = (id) => document.getElementById(id);
+const status = (msg, cls = "") => { $("status").className = cls; $("status").textContent = msg; };
+let args = null, done = {}, busy = false;
+
+function provider() {
+  for (const w of [window.parent, window]) {
+    try {
+      if (w.solflare && w.solflare.isSolflare) return { name: "Solflare", p: w.solflare };
+      if (w.phantom && w.phantom.solana && w.phantom.solana.isPhantom) return { name: "Phantom", p: w.phantom.solana };
+      if (w.solana && w.solana.isPhantom) return { name: "Phantom", p: w.solana };
+    } catch (e) { /* cross-origin parent: skip */ }
+  }
+  return null;
+}
+
+function b64(bytes) { let s = ""; bytes.forEach((b) => (s += String.fromCharCode(b))); return btoa(s); }
+
+async function sign() {
+  if (!args || busy || done[args.request_id]) return;
+  const found = provider();
+  if (!found) { status("No Solana wallet found. Install Solflare or Phantom, then reload the dashboard.", "bad"); $("go").disabled = false; return; }
+  busy = true; $("go").disabled = true;
+  try {
+    status("Connecting to " + found.name + "…");
+    const res = await found.p.connect();               // Phantom: { publicKey }, Solflare: true
+    const pk = (res && res.publicKey) || found.p.publicKey;
+    if (!pk) throw new Error(found.name + " did not share a wallet address.");
+    const signer = new solanaWeb3.PublicKey(pk.toString());
+    $("wallet").textContent = "Wallet " + signer.toBase58();
+    status("Fetching a recent devnet blockhash…");
+    const conn = new solanaWeb3.Connection(args.rpc, "confirmed");
+    const { blockhash } = await conn.getLatestBlockhash("confirmed");
+    // GraniteGuard pays the fee; the engineer's wallet is the Memo signer.
+    const tx = new solanaWeb3.Transaction({ feePayer: new solanaWeb3.PublicKey(args.payer), recentBlockhash: blockhash });
+    const BufferCls = signer.toBuffer().constructor;     // web3.js wants its own Buffer type
+    tx.add(new solanaWeb3.TransactionInstruction({
+      programId: new solanaWeb3.PublicKey(MEMO_PROGRAM),
+      keys: [{ pubkey: signer, isSigner: true, isWritable: false }],
+      data: BufferCls.from(args.memo, "utf8"),
+    }));
+    status("Approve the request in your " + found.name + " popup…");
+    const signed = await found.p.signTransaction(tx);
+    const raw = signed.serialize({ requireAllSignatures: false, verifySignatures: false });
+    done[args.request_id] = true;
+    status("Signed. Submitting to Solana…", "ok");
+    send("streamlit:setComponentValue", { value: { request_id: args.request_id, wtx: b64(raw) }, dataType: "json" });
+  } catch (err) {
+    status("Not signed: " + (err && err.message ? err.message : err), "bad");
+    $("go").disabled = false;
+  } finally { busy = false; }
+}
+
+$("go").onclick = sign;
+window.addEventListener("message", (event) => {
+  const d = event.data || {};
+  if (d.type !== "streamlit:render") return;
+  const fresh = !args || args.request_id !== d.args.request_id;
+  args = d.args;
+  if (fresh && !done[args.request_id]) { $("go").disabled = false; status("Opening your wallet…"); setTimeout(sign, 50); }
+});
+send("streamlit:componentReady", { apiVersion: 1 });
+send("streamlit:setFrameHeight", { height: 96 });
+</script>
+</body>
+</html>
