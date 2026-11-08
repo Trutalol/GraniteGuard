@@ -71,6 +71,27 @@ def fresh_signoff_session():
 
 fresh_signoff_session()
 signoffs = chain.latest_signoffs()  # cve_id -> latest Solana sign-off (off-chain log)
+# Fix status tag for every vulnerability: "Not handled" until someone signs it off.
+STATUS_TAGS = {
+    "not_handled": ("Not handled", "#fff1f1", "#a2191f", "#ffd7d9"),
+    "patched": ("Fixed", "#defbe6", "#0e6027", "#a7f0ba"),
+    "mitigated": ("Mitigated", "#e5f6ff", "#00539a", "#bae6ff"),
+    "not_affected": ("Not affected", "#f2f4f8", "#393939", "#dde1e6"),
+    "risk_accepted": ("Risk accepted", "#fcf4d6", "#684e00", "#f1c21b"),
+}
+
+
+def fix_status(cve_id):
+    entry = signoffs.get(cve_id)
+    status = entry["record"].get("status") if entry else None
+    return status if status in STATUS_TAGS else "not_handled"
+
+
+def status_tag(cve_id):
+    label, bg, fg, border = STATUS_TAGS[fix_status(cve_id)]
+    note = " title=\"Signed off on Solana\"" if cve_id in signoffs else ""
+    mark = "&#10003; " if cve_id in signoffs else "&#9679; "
+    return f'<span class="gg-issue-tag gg-status-tag"{note} style="background:{bg};color:{fg};border-color:{border}">{mark}{escape(label)}</span>'
 
 
 @st.dialog("Sign off on Solana")
@@ -123,7 +144,7 @@ def page_url(cve_id=""):
     params = {"budget": budget}
     if query:
         params["q"] = query
-    for name, value in [("severity", severity_filter), ("exploit", exploit_filter), ("surface", surface_filter)]:
+    for name, value in [("severity", severity_filter), ("exploit", exploit_filter), ("surface", surface_filter), ("status", status_filter)]:
         params[name] = value
     if cve_id:
         params["cve"] = cve_id
@@ -290,8 +311,12 @@ def filter_value(name, options):
 severity_filter = filter_value("severity", severity_options)
 exploit_filter = filter_value("exploit", exploit_options)
 surface_filter = filter_value("surface", surface_options)
+status_options = ["All statuses"] + [label for label, *_ in STATUS_TAGS.values()]
+status_filter = filter_value("status", status_options)
 if not requested_cve:
-    severity_col, exploit_col, surface_col = st.columns(3)
+    status_col, severity_col, exploit_col, surface_col = st.columns(4)
+    with status_col:
+        status_filter = st.selectbox("Fix status", status_options, index=status_options.index(status_filter))
     with severity_col:
         severity_filter = st.selectbox("Severity", severity_options, index=severity_options.index(severity_filter))
     with exploit_col:
@@ -317,6 +342,9 @@ if exploit_filter != "Any code status":
     queue = queue[has_code if exploit_filter == "Public code reported" else ~has_code]
 if surface_filter != "All attack surfaces":
     queue = queue[queue.cve_id.map(lambda item: surface_filter in {tag.strip() for tag in str(surface.get(item, "")).split(";")})]
+if status_filter != "All statuses":
+    wanted = next(key for key, (label, *_) in STATUS_TAGS.items() if label == status_filter)
+    queue = queue[queue.cve_id.map(fix_status) == wanted]
 
 if not requested_cve:
     html(f'<div class="gg-issue-toolbar"><strong>&#9678; &nbsp; {len(queue)} vulnerabilities</strong><span>Ranked by priority &middot; click a finding to investigate</span></div>')
@@ -328,8 +356,7 @@ if not requested_cve:
         description = str(row.description) if pd.notna(row.description) else "Description pending"
         summary = description[:185] + ("..." if len(description) > 185 else "")
         badges = ''.join(f'<span class="gg-issue-tag">{escape(tag)}</span>' for tag in tags[:4])
-        if row.cve_id in signoffs:
-            badges = f'<span class="gg-issue-tag" style="background:#defbe6;color:#0e6027;border-color:#a7f0ba">&#10003; Fix signed on Solana</span>' + badges
+        badges = status_tag(row.cve_id) + badges
         issue_rows.append(f'''<a class="gg-issue-row" href="{escape(page_url(row.cve_id), quote=True)}" target="_self">
     <span class="gg-issue-icon" aria-hidden="true">&#9678;</span><div class="gg-issue-body">
     <div class="gg-issue-title">{escape(row.cve_id)} <span class="gg-issue-rank">#{int(row.rank)}</span></div>
@@ -358,11 +385,12 @@ with metadata:
     st.caption("EPSS estimates exploitation likelihood over 30 days; it is not severity.")
     st.divider()
     st.markdown("**Fix status**")
+    html(status_tag(cve))
     if cve in signoffs:
-        st.write("✅ " + chain.STATUSES[signoffs[cve]["record"]["status"]])
+        st.caption(chain.STATUSES.get(signoffs[cve]["record"]["status"], ""))
         st.link_button("Solana proof", signoffs[cve]["explorer"])
     else:
-        st.write("Open: not signed off")
+        st.caption("No fix has been signed off yet.")
     st.markdown("**Attack surface**")
     st.write(surface.get(cve) or "Not supplied")
     st.markdown("**Published**")
