@@ -134,27 +134,6 @@ def search_changed():
     if "cve" in st.query_params:
         del st.query_params["cve"]
 
-def supporting_information():
-    help_column, method_column = st.columns(2)
-    with help_column.expander("New here? Start with this"):
-        st.write("A CVE identifies a software vulnerability. Click a finding to see why it ranks highly and how to investigate a fix. Use the slider to focus your queue; search applies within that budget.")
-        st.write("Severity describes potential damage. EPSS estimates exploitation likelihood. The model ranking combines its supplied signals to order the queue.")
-    with method_column.expander("Method & submission"):
-        st.write("Evaluate model, CVSS, and EPSS on the same eligible population and temporal cutoff. Comparing only this shortlist cannot establish full-benchmark improvement. KEV absence does not prove absence of exploitation.")
-        st.warning("The handoff lacks snapshot_month and feature provenance. Person 1 must confirm cutoff-safe features and audit current NIST descriptions, scores, status, product counts, and references for leakage.")
-        st.write("Pending evidence: temporal validation, hits@500, precision@500, baseline results, Granite model identifiers, and verified service calls.")
-        eligible = False
-        scoreboard_path = config.RAW_DIR / "scoreboard_2026.csv"
-        if scoreboard_path.exists():
-            try:
-                scoreboard = pd.read_csv(scoreboard_path, usecols=["cve_id"])
-                eligible = len(top) == 500 and top.cve_id.isin(scoreboard.cve_id).all()
-            except (ValueError, pd.errors.ParserError):
-                st.error("Cannot read scoreboard eligibility list.")
-        st.download_button("Download judge top500.csv", top[["cve_id"]].to_csv(index=False), file_name="top500.csv", mime="text/csv", disabled=not eligible)
-        st.caption("Export requires 500 unique, non-demo IDs in data/raw/scoreboard_2026.csv. It contains only cve_id. Eligibility does not verify temporal leakage or model quality.")
-
-
 def render_history(cve):
     series = hist[hist["cve_id"] == cve].copy()
     series["month"] = pd.to_datetime(series["month"], errors="coerce")
@@ -281,32 +260,18 @@ def render_exploration(cve, candidates):
     chart.update_yaxes(gridcolor="#eee")
     st.plotly_chart(chart, use_container_width=True)
 
-budget = initial_budget
+budget = len(top)
 with st.container(key="site_header"):
     brand, search = st.columns([5, 3], vertical_alignment="center")
     with brand:
-        html('<div class="gg-brand"><span class="gg-mark">G</span>GraniteGuard</div><div class="gg-brand-sub">VULNERABILITY INTELLIGENCE</div>')
+        html('<div class="gg-brand"><span class="gg-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5 4 5.5v6c0 5 3.4 8.9 8 10 4.6-1.1 8-5 8-10v-6z"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg></span>GraniteGuard</div><div class="gg-brand-sub">VULNERABILITY INTELLIGENCE</div>')
     with search:
-        query = st.text_input("Find a vulnerability", value=st.query_params.get("q", ""), placeholder="Search CVE or description...", label_visibility="visible", key="header_search", on_change=search_changed)
-
-with st.container(key="top_tools"):
-    html('<div class="gg-top-tools"><span class="gg-workspace">&#9678; &nbsp; Priority workspace</span><span><b>YOUR WORKFLOW</b> &nbsp; 01 Focus the queue &nbsp; / &nbsp; 02 Inspect the evidence &nbsp; / &nbsp; 03 Plan the next action</span></div>')
-    supporting_information()
-
+        query = st.text_input("Find a vulnerability", value=st.query_params.get("q", ""), placeholder="Search CVE or description...", label_visibility="collapsed", key="header_search", on_change=search_changed)
 
 if not requested_cve:
     first = top.iloc[0]
-    html('<div class="gg-topbar"><span>WORKSPACE &nbsp; / &nbsp; OVERVIEW</span><span class="gg-status">' + 'Imported dataset' + '</span></div>')
-    html(f'''<section class="gg-hero"><div><div class="gg-kicker">A clearer signal. A smarter next step.</div>
-    <h1>Less noise.<br><span>Know what to fix first.</span></h1>
-    <p>Turn a long list of vulnerabilities into a focused investigation. See the signals, understand the priority, and make your next decision.</p></div>
-    <div class="gg-hero-right"><div class="gg-kicker">First in your ranking</div><div class="gg-focus">{escape(str(first['cve_id']))}</div>
-    <div class="gg-focus-meta"><span class="gg-pill">PRIORITY #1</span><span class="gg-pill">EPSS {number(first['epss'], '.2%')}</span></div>
-    <p>Start with the leading finding, then inspect the evidence behind its position.</p></div></section>''')
-    html('<div class="gg-demo"><strong>Imported data</strong><span>Team-supplied rankings and explanations. Provenance and evaluation are available in Method & submission.</span></div>')
     metrics = [
         ("Vulnerabilities", f"{len(top):,}", "In the supplied ranking"),
-        ("Your review queue", str(budget), "Highest-ranked findings"),
         ("Critical severity", str(int((top.cvss >= 9).sum())), "CVSS ≥ 9 · across all findings"),
         ("Missing severity", str(int(top.cvss.isna().sum())), "Unknown does not mean safe"),
     ]
@@ -314,14 +279,6 @@ if not requested_cve:
 
 
 if not requested_cve:
-    slider_column, refresh_column, _ = st.columns([3, 1.3, 5], vertical_alignment="center")
-    with slider_column, st.container(key="queue_controls"):
-        html('<div class="gg-kicker">Shape your queue</div>')
-        budget = st.slider("Review budget", 1, len(top), initial_budget, help="Choose how many ranked vulnerabilities to display.") if len(top) > 1 else 1
-        st.caption("Drag the slider to adjust how many ranked findings you review.")
-    with refresh_column:
-        st.button("Refresh data", use_container_width=True)
-    metrics[1] = ("Your review queue", str(budget), "Highest-ranked findings")
     metrics_slot.markdown('<div class="gg-stats">' + ''.join(f'<div class="gg-stat"><div class="gg-stat-label">{label}</div><div class="gg-stat-value">{value}</div><div class="gg-stat-note">{note}</div></div>' for label,value,note in metrics) + '</div>', unsafe_allow_html=True)
 surface = cards.drop_duplicates("cve_id").set_index("cve_id")["attack_surface"].fillna("").to_dict() if not cards.empty else {}
 severity_options = ["All severities", "Critical (9-10)", "High (7-8.9)", "Medium (4-6.9)", "Low (0.1-3.9)", "None (0)", "Unknown"]
@@ -341,7 +298,7 @@ if not requested_cve:
         exploit_filter = st.selectbox("Public exploit / detection code", exploit_options, index=exploit_options.index(exploit_filter))
     with surface_col:
         surface_filter = st.selectbox("Attack surface", surface_options, index=surface_options.index(surface_filter))
-    st.caption("Filters apply within your review budget. Code status and attack-surface tags come from supplied threat cards; an absent tag does not prove absence of exploit code.")
+    st.caption("Filters apply across all ranked findings. Code status and attack-surface tags come from supplied threat cards; an absent tag does not prove absence of exploit code.")
 queue = top.head(budget)
 if query:
     queue = queue[queue.cve_id.str.contains(query, case=False, regex=False, na=False) | queue.description.str.contains(query, case=False, regex=False, na=False)]
@@ -362,47 +319,24 @@ if surface_filter != "All attack surfaces":
     queue = queue[queue.cve_id.map(lambda item: surface_filter in {tag.strip() for tag in str(surface.get(item, "")).split(";")})]
 
 if not requested_cve:
-    list_column, preview_column = st.columns([6, 4], gap="large")
-    with list_column:
-        html(f'<div class="gg-issue-toolbar"><strong>&#9678; &nbsp; {len(queue)} vulnerabilities</strong><span>Ranked by priority &middot; click a finding to investigate</span></div>')
-        if queue.empty:
-            st.info("No matches within this budget. Clear search or increase the budget.")
-        issue_rows = []
-        for row in queue.itertuples():
-            tags = [tag.strip() for tag in str(surface.get(row.cve_id, "")).split(";") if tag.strip()]
-            description = str(row.description) if pd.notna(row.description) else "Description pending"
-            summary = description[:185] + ("..." if len(description) > 185 else "")
-            badges = ''.join(f'<span class="gg-issue-tag">{escape(tag)}</span>' for tag in tags[:4])
-            if row.cve_id in signoffs:
-                badges = f'<span class="gg-issue-tag" style="background:#defbe6;color:#0e6027;border-color:#a7f0ba">&#10003; Fix signed on Solana</span>' + badges
-            issue_rows.append(f'''<a class="gg-issue-row" href="{escape(page_url(row.cve_id), quote=True)}" target="_self">
+    html(f'<div class="gg-issue-toolbar"><strong>&#9678; &nbsp; {len(queue)} vulnerabilities</strong><span>Ranked by priority &middot; click a finding to investigate</span></div>')
+    if queue.empty:
+        st.info("No matches. Clear the search or change the filters.")
+    issue_rows = []
+    for row in queue.itertuples():
+        tags = [tag.strip() for tag in str(surface.get(row.cve_id, "")).split(";") if tag.strip()]
+        description = str(row.description) if pd.notna(row.description) else "Description pending"
+        summary = description[:185] + ("..." if len(description) > 185 else "")
+        badges = ''.join(f'<span class="gg-issue-tag">{escape(tag)}</span>' for tag in tags[:4])
+        if row.cve_id in signoffs:
+            badges = f'<span class="gg-issue-tag" style="background:#defbe6;color:#0e6027;border-color:#a7f0ba">&#10003; Fix signed on Solana</span>' + badges
+        issue_rows.append(f'''<a class="gg-issue-row" href="{escape(page_url(row.cve_id), quote=True)}" target="_self">
     <span class="gg-issue-icon" aria-hidden="true">&#9678;</span><div class="gg-issue-body">
     <div class="gg-issue-title">{escape(row.cve_id)} <span class="gg-issue-rank">#{int(row.rank)}</span></div>
     <div class="gg-issue-summary">{escape(summary)}</div><div class="gg-issue-meta">{badges}<span>Published {escape(str(row.published_date))}</span></div></div>
     <div class="gg-issue-signals"><strong>CVSS {number(row.cvss, '.1f')}</strong><span>EPSS {number(row.epss, '.2%')}</span><span class="gg-issue-open">View investigation &rarr;</span></div></a>''')
-        html('<div class="gg-issue-list gg-issue-scroll">' + ''.join(issue_rows) + '</div>')
-        st.caption("The ranking orders investigation, not confirmed attacks. Public code can include scanner templates as well as exploits. Missing signals are not proof of safety.")
-
-    with preview_column:
-        html('<div class="gg-section"><h2>Investigation preview</h2><span class="gg-count">Signals &amp; context</span></div>')
-        if queue.empty:
-            st.info("Clear your search or increase the budget to preview a finding.")
-        else:
-            preview_cve = st.selectbox("Preview a vulnerability", queue.cve_id.tolist(), key="queue_preview")
-            preview_row = top.loc[top.cve_id == preview_cve].iloc[0]
-            html(f'<div class="gg-detail"><div class="gg-kicker">Priority #{int(preview_row["rank"])}</div><h3>{escape(preview_cve)}</h3><div class="gg-detail-metrics"><div><span>CVSS / 10</span><b>{number(preview_row["cvss"], ".1f")}</b></div><div><span>EPSS</span><b>{number(preview_row["epss"], ".2%")}</b></div></div></div>')
-            render_exploration(preview_cve, queue)
-            st.markdown("**Why fix this first**")
-            preview_card = cards[cards.cve_id == preview_cve]
-            if not preview_card.empty:
-                st.caption("IBM Granite - team-supplied explanation")
-                st.write(preview_card.iloc[0]["why_fix_first"])
-            else:
-                st.info("No explanation has been supplied for this finding yet.")
-            with st.expander("Vulnerability description"):
-                st.write(preview_row["description"])
-            html(f'<a class="gg-open-detail" href="{escape(page_url(preview_cve), quote=True)}" target="_self">Open fix guidance &amp; Copilot &rarr;</a>')
-            st.caption("The full investigation includes remediation guidance, reference lookups, and Ask Copilot.")
+    html('<div class="gg-issue-list gg-issue-scroll">' + ''.join(issue_rows) + '</div>')
+    st.caption("The ranking orders investigation, not confirmed attacks. Public code can include scanner templates as well as exploits. Missing signals are not proof of safety.")
     st.stop()
 
 match = top.loc[top.cve_id == requested_cve]

@@ -2,7 +2,7 @@
 :root {color-scheme:dark; --ink:#0e0e0e; --panel:#1a1a1a; --line:#303030; --accent:#d1d1d1; --muted:#a8a8a8;}
 [data-testid="stAppViewContainer"] {background:radial-gradient(ellipse at 75% 0%,#2d2d2d55,transparent 48%),var(--ink);color:#f2f2f2;}
 [data-testid="stHeader"] {background:transparent;}
-.block-container {padding:2rem 2.6rem 3rem;max-width:1640px;}
+.block-container {padding:2rem 2.6rem 3rem;max-width:100%;}
 [data-testid="stSidebar"] {background:#131313;border-right:1px solid var(--line);}
 [data-testid="stSidebar"] > div:first-child {padding-top:1.7rem;}
 [data-testid="stSidebar"] p, [data-testid="stSidebar"] label {color:#bfbfbf;}
@@ -191,7 +191,7 @@ a.gg-issue-row:focus-visible {outline:2px solid #0f62fe;outline-offset:-3px;}
 .st-key-site_header .gg-brand {margin-bottom:4px;}
 .st-key-site_header .gg-brand-sub {margin-bottom:0;font-size:9px;letter-spacing:2px;}
 .st-key-queue_controls {background:#f8faff;border:1px solid #d8e2f1;border-radius:10px;padding:16px 24px 8px;margin-bottom:14px;}
-.block-container {max-width:1320px;}
+.block-container {max-width:100%;}
 .st-key-site_header .gg-brand {font-size:32px;letter-spacing:-1.2px;gap:12px;}
 .st-key-site_header .gg-mark {width:42px;height:46px;font-size:23px;}
 .st-key-site_header .gg-brand-sub {font-size:10px;margin-left:54px;letter-spacing:2px;}
@@ -209,3 +209,15 @@ a.gg-open-detail:hover {background:#0043ce;}
 @media(max-width:700px){.gg-top-tools{align-items:flex-start;flex-direction:column}.st-key-site_header .gg-brand{font-size:28px}}
 a.gg-back {display:inline-block;color:#0043ce;margin:0 0 25px;text-decoration:none;font-size:14px;}
 @media(max-width:700px){.gg-issue-toolbar{align-items:flex-start;flex-direction:column}.gg-issue-row{flex-wrap:wrap}.gg-issue-signals{align-items:flex-start;margin-left:38px;flex-direction:row;flex-wrap:wrap}.gg-issue-icon{font-size:18px}}
+/* Full-screen layout: use the whole browser width */
+.block-container, [data-testid="stMainBlockContainer"], [data-testid="stAppViewBlockContainer"] {max-width:100% !important;width:100% !important;padding-left:2rem !important;padding-right:2rem !important;}
+
+/* Logo: line icon instead of filled badge */
+.gg-mark {clip-path:none!important;background:none!important;color:inherit!important;width:30px;height:30px;}
+.gg-mark svg {width:28px;height:28px;display:block;}
+/* Header tidy-up */
+.st-key-site_header .gg-mark {width:40px;height:40px;}
+.st-key-site_header .gg-mark svg {width:40px;height:40px;}
+.st-key-site_header .gg-brand-sub {margin-left:52px;}
+.gg-stats {grid-template-columns:repeat(3,1fr);}
+@media(max-width:700px){.gg-stats{grid-template-columns:1fr}}
